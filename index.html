@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ノートPC版：歩きPC防止アラーム</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding-top: 30px; background-color: #f5f5f5; }
+        .btn { padding: 15px 30px; font-size: 1.1rem; background-color: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; }
+        #video { display: none; } /* カメラ映像は裏で処理するため非表示（確認用なら block に変更） */
+        #canvas { display: none; }
+        #status { margin-top: 30px; font-size: 1.5rem; font-weight: bold; }
+        .danger { color: red; }
+        .safe { color: green; }
+    </style>
+</head>
+<body>
+
+    <h1>歩きノートPC 検知テスト</h1>
+    <p>ノートPCを開いたまま歩きスマホならぬ「歩きPC」をしてしまうのを防ぎます。<br>カメラと音声の許可をしてください。</p>
+    <button class="btn" onclick="startCamera()">検知スタート</button>
+
+    <div id="status">停止中</div>
+
+    <video id="video" width="320" height="240" autoplay playsinline></video>
+    <canvas id="canvas" width="320" height="240"></canvas>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        
+        let audioCtx = null;
+        let lastFrameData = null;
+        let isWalking = false;
+
+        // アラーム（ビープ音）を鳴らす
+        function playAlarm() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            let osc = audioCtx.createOscillator();
+            osc.type = 'sawtooth'; // スマートフォン版より少し強めの警告音（のこぎり波）
+            osc.frequency.setValueAtTime(600, audioCtx.currentTime); 
+            osc.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.4);
+        }
+
+        // カメラの起動
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                video.srcObject = stream;
+                statusDiv.innerText = "検知中（部屋の中でPCを持って少し動いてみてね）";
+                
+                // 0.2秒ごとにカメラの映像（フレーム）をチェックする
+                setInterval(checkMovement, 200);
+            } catch (err) {
+                alert("カメラの起動に失敗しました。許可設定を確認してください。");
+                console.error(err);
+            }
+        }
+
+        // 前の画像と今の画像の「差分」を計算して揺れを検知する
+        function checkMovement() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                // 現在の画面のピクセルデータを取得
+                const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                
+                if (lastFrameData) {
+                    let diff = 0;
+                    // 簡易的にピクセルの色の変化（差分）を計算
+                    for (let i = 0; i < currentFrame.data.length; i += 4) {
+                        // 赤・緑・青の色の差の絶対値
+                        diff += Math.abs(currentFrame.data[i] - lastFrameData.data[i]);
+                    }
+                    
+                    // 変化の量が一定以上（PCが激しく揺れている＝歩いている）場合
+                    // ※環境に合わせて「1500000」の数値を調整してください
+                    if (diff > 1500000) { 
+                        statusDiv.innerHTML = "<span class='danger'>⚠️ 歩きながらのPC操作を検知しました！</span>";
+                        playAlarm();
+                    } else {
+                        statusDiv.innerHTML = "<span class='safe'>安全（停止状態）です</span>";
+                    }
+                }
+                lastFrameData = currentFrame;
+            }
+        }
+    </script>
+</body>
+</html>
