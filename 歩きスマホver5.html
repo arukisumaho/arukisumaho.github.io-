@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>歩きスマホ防止検知アプリ (MediaPipe AI版)</title>
+  
+  <!-- MediaPipe Vision ライブラリの読み込み (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js" crossorigin="anonymous"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      color: #fff;
+      transition: background-color 0.3s ease;
+      background-color: #059669; /* 初期状態：緑（安全） */
+      overflow: hidden;
+    }
+
+    /* 危険時の背景赤点滅 */
+    body.danger {
+      background-color: #dc2626 !important;
+      animation: pulse-bg 0.5s infinite alternate;
+    }
+    @keyframes pulse-bg {
+      0% { background-color: #dc2626; }
+      100% { background-color: #7f1d1d; }
+    }
+
+    header {
+      padding: 16px;
+      text-align: center;
+      background: rgba(0, 0, 0, 0.2);
+    }
+    h1 { font-size: 1.2rem; }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      gap: 16px;
+      text-align: center;
+    }
+
+    #status-card {
+      background: rgba(0, 0, 0, 0.4);
+      padding: 16px 24px;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 320px;
+    }
+    #status-title { font-size: 1.5rem; font-weight: bold; margin-bottom: 8px; }
+    #status-detail { font-size: 0.9rem; opacity: 0.9; }
+
+    .video-container {
+      position: relative;
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      overflow: hidden;
+      border: 4px solid rgba(255, 255, 255, 0.5);
+      background: #000;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1); /* 鏡像表示 */
+    }
+
+    footer {
+      background: rgba(0, 0, 0, 0.6);
+      padding: 20px;
+      border-top-left-radius: 20px;
+      border-top-right-radius: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .slider-group {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      font-size: 0.85rem;
+    }
+    .slider-group label { display: flex; justify-content: space-between; width: 100%; }
+    input[type="range"] { width: 100%; }
+
+    button {
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      background: #3b82f6;
+      color: white;
+      font-weight: bold;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    button:disabled {
+      background: #6b7280;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>歩きスマホ AI自動検知システム</h1>
+  </header>
+
+  <main>
+    <div class="video-container">
+      <video id="webcam" autoplay playsinline muted></video>
+    </div>
+
+    <div id="status-card">
+      <div id="status-title">🤖 AI準備中...</div>
+      <div id="status-detail">モデルをロードしています</div>
+    </div>
+  </main>
+
+  <footer>
+    <button id="start-btn" disabled>AIロード完了を待ってください</button>
+
+    <div class="slider-group">
+      <label>
+        <span>顔の下向き検知角度 (度):</span>
+        <span id="cam-val">15</span>
+      </label>
+      <input type="range" id="cam-threshold" min="5" max="40" value="15">
+    </div>
+
+    <div class="slider-group">
+      <label>
+        <span>加速度センサー閾値 (歩行揺れ):</span>
+        <span id="motion-val">3.0</span>
+      </label>
+      <input type="range" id="motion-threshold" min="1.0" max="10.0" step="0.5" value="3.0">
+    </div>
+  </footer>
+
+  <script>
+    let faceLandmarker = null;
+    let isLookingDown = false;
+    let isWalking = false;
+    let audioCtx = null;
+    let lastAccel = { y: 0, z: 0 };
+    let lastWalkingTime = 0;
+    let lastVideoTime = -1;
+
+    const body = document.body;
+    const video = document.getElementById('webcam');
+    const statusTitle = document.getElementById('status-title');
+    const statusDetail = document.getElementById('status-detail');
+    const startBtn = document.getElementById('start-btn');
+
+    const camThresholdInput = document.getElementById('cam-threshold');
+    const motionThresholdInput = document.getElementById('motion-threshold');
+    const camValDisplay = document.getElementById('cam-val');
+    const motionValDisplay = document.getElementById('motion-val');
+
+    camThresholdInput.addEventListener('input', (e) => camValDisplay.textContent = e.target.value);
+    motionThresholdInput.addEventListener('input', (e) => motionValDisplay.textContent = e.target.value);
+
+    // --- 1. MediaPipe AIモデルの初期化 ---
+    async function initMediaPipe() {
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+        );
+        faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+            delegate: "GPU"
+          },
+          runningMode: "VIDEO",
+          numFaces: 1
+        });
+
+        statusTitle.textContent = "🌱 安全な状態です";
+        statusDetail.textContent = "ボタンを押して開始してください";
+        startBtn.textContent = "AIカメラ・センサーを開始";
+        startBtn.disabled = false;
+      } catch (err) {
+        console.error("MediaPipe初期化エラー:", err);
+        statusTitle.textContent = "❌ AI初期化失敗";
+        statusDetail.textContent = "ネット接続等を確認してください";
+      }
+    }
+    window.addEventListener('load', initMediaPipe);
+
+    // --- 2. アプリ起動イベント ---
+    startBtn.addEventListener('click', async () => {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      await initCamera();
+
+      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        const permission = await DeviceMotionEvent.requestPermission();
+        if (permission === 'granted') {
+          window.addEventListener('devicemotion', handleMotion);
+        }
+      } else {
+        window.addEventListener('devicemotion', handleMotion);
+      }
+
+      startBtn.style.display = 'none';
+    });
+
+    // --- 3. カメラ起動＆AI顔角度解析ループ ---
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user' },
+          audio: false
+        });
+        video.srcObject = stream;
+        video.addEventListener("loadeddata", predictWebcam);
+      } catch (err) {
+        alert('カメラのアクセスが拒否されたか、対応していません。');
+      }
+    }
+
+    async function predictWebcam() {
+      if (video.currentTime !== lastVideoTime && faceLandmarker) {
+        lastVideoTime = video.currentTime;
+        const results = faceLandmarker.detectForVideo(video, performance.now());
+
+        if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+          const landmarks = results.faceLandmarks[0];
+
+          // 主要ポイントの取得（4: 鼻頭, 234: 左耳周辺, 454: 右耳周辺）
+          const nose = landmarks[4];
+          const leftEar = landmarks[234];
+          const rightEar = landmarks[454];
+
+          // 両耳の平均高さ（Y座標）と奥行き（Z座標）を算出
+          const earY = (leftEar.y + rightEar.y) / 2;
+          const earZ = (leftEar.z + rightEar.z) / 2;
+
+          // 鼻頭と耳の位置関係から「うなずき（下向き）角度」を簡易幾何計算
+          const dy = nose.y - earY;
+          const dz = nose.z - earZ;
+          const pitchRadians = Math.atan2(dy, dz);
+          const pitchDegrees = pitchRadians * (180 / Math.PI);
+
+          const thresholdDegrees = parseFloat(camThresholdInput.value);
+
+          // 角度が閾値を超えて下を向いているか判定
+          isLookingDown = pitchDegrees > thresholdDegrees;
+        } else {
+          // 顔がカメラに写っていない場合は「下を向いていない」と判定
+          isLookingDown = false;
+        }
+        updateState();
+      }
+      requestAnimationFrame(predictWebcam);
+    }
+
+    // --- 4. 加速度センサー処理 ---
+    function handleMotion(event) {
+      const accel = event.accelerationIncludingGravity;
+      if (!accel) return;
+
+      const deltaY = Math.abs(accel.y - lastAccel.y);
+      const deltaZ = Math.abs(accel.z - lastAccel.z);
+      lastAccel = { y: accel.y, z: accel.z };
+
+      const totalDelta = deltaY + deltaZ;
+      const threshold = parseFloat(motionThresholdInput.value);
+      const now = Date.now();
+
+      if (totalDelta > threshold) {
+        lastWalkingTime = now;
+      }
+
+      const delayTime = 2000;
+      isWalking = (now - lastWalkingTime) < delayTime;
+
+      updateState();
+    }
+
+    // --- 5. 判定と警告発生機能 ---
+    function updateState() {
+      if (isLookingDown && isWalking) {
+        body.className = 'danger';
+        statusTitle.textContent = '⚠️ 危険！歩きスマホです！';
+        statusDetail.textContent = 'AIが顔の下向き角度と歩行を検知しました！';
+
+        playAlertSound();
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      } else {
+        body.className = '';
+        statusTitle.textContent = '🌱 安全な状態です';
+
+        if (isWalking && !isLookingDown) {
+          statusDetail.textContent = '前を向いて歩いています';
+        } else if (!isWalking && isLookingDown) {
+          statusDetail.textContent = '立ち止まって操作しています';
+        } else {
+          statusDetail.textContent = '周囲の安全が確保されています';
+        }
+      }
+    }
+
+    // 警告音再生
+    let lastSoundTime = 0;
+    function playAlertSound() {
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+      if (now - lastSoundTime < 0.5) return;
+      lastSoundTime = now;
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(880, now);
+      gain.gain.setValueAtTime(0.1, now);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.3);
+    }
+  </script>
+</body>
+</html>
