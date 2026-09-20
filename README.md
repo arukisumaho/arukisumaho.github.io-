@@ -1,1 +1,0 @@
-# arukisumaho.github.io-
