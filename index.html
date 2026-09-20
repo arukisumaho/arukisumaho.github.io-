@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>歩きスマホ自動検知システム</title>
   
-  <!-- MediaPipe (顔・姿勢認識) のライブラリを読み込み -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+  <!-- 【修正箇所】MediaPipe (顔・姿勢認識) のライブラリを同じフォルダーから読み込み -->
+  <script src="./camera_utils.js"></script>
+  <script src="./face_mesh.js"></script>
 
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -110,7 +110,7 @@
 <body>
 
   <header>
-    <h1>歩きスマホ自動検知システム (MediaPipe版)</h1>
+    <h1>歩きスマホ自動検知システム (オフライン対応版)</h1>
   </header>
 
   <main>
@@ -188,7 +188,8 @@
     // --- 2. MediaPipe Face Mesh（顔認識AI）による下向き判定 ---
     function initFaceMesh() {
       const faceMesh = new FaceMesh({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+        // 【修正箇所】同じフォルダー（ローカル）のWASMファイルやモデルを読み込む指定
+        locateFile: (file) => `./${file}`
       });
 
       faceMesh.setOptions({
@@ -223,7 +224,7 @@
       // 鼻先（1番）と顎（152番）のY座標から「顔が下を向いているか」を計算
       const noseY = landmarks[1].y;
       const chinY = landmarks[152].y;
-      const faceDiff = chinY - noseY;
+      faceDiff = chinY - noseY;
 
       const threshold = parseFloat(camThresholdInput.value);
       
