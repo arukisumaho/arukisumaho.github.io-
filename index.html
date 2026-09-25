@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>歩きスマホ自動検知システム (テストモード付き)</title>
+  <title>歩きスマホ自動検知システム</title>
   
+  <!-- 【修正箇所】MediaPipe (顔・姿勢認識) のライブラリを同じフォルダーから読み込み -->
   <script src="./camera_utils.js"></script>
   <script src="./face_mesh.js"></script>
 
@@ -17,10 +18,11 @@
       height: 100vh;
       color: #fff;
       transition: background-color 0.3s ease;
-      background-color: #059669;
+      background-color: #059669; /* 初期状態：緑（安全） */
       overflow: hidden;
     }
 
+    /* 危険時の背景赤点滅 */
     body.danger {
       background-color: #dc2626 !important;
       animation: pulse-bg 0.5s infinite alternate;
@@ -71,7 +73,7 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
-      transform: scaleX(-1);
+      transform: scaleX(-1); /* 鏡像表示 */
     }
 
     footer {
@@ -103,21 +105,12 @@
       font-size: 1rem;
       cursor: pointer;
     }
-
-    /* テスト用ボタンのスタイル */
-    #test-walk-btn {
-      background: #f59e0b;
-      margin-top: 4px;
-    }
-    #test-walk-btn.active {
-      background: #ef4444;
-    }
   </style>
 </head>
 <body>
 
   <header>
-    <h1>歩きスマホ自動検知システム (テストモード付き)</h1>
+    <h1>歩きスマホ自動検知システム (オフライン対応版)</h1>
   </header>
 
   <main>
@@ -133,8 +126,6 @@
 
   <footer>
     <button id="start-btn">センサー・AIカメラを開始</button>
-    <!-- センサーがないPC用の擬似歩行ボタン -->
-    <button id="test-walk-btn">🚶 擬似歩行モード: OFF</button>
 
     <div class="slider-group">
       <label>
@@ -143,12 +134,19 @@
       </label>
       <input type="range" id="cam-threshold" min="0.01" max="0.15" step="0.01" value="0.05">
     </div>
+
+    <div class="slider-group">
+      <label>
+        <span>加速度センサー閾値（歩行揺れ）:</span>
+        <span id="motion-val">3.0</span>
+      </label>
+      <input type="range" id="motion-threshold" min="1.0" max="10.0" step="0.5" value="3.0">
+    </div>
   </footer>
 
   <script>
     let isLookingDown = false;
     let isWalking = false;
-    let forceWalking = false; // PCテスト用の疑似歩行フラグ
     let audioCtx = null;
     let lastAccel = { y: 0, z: 0 };
     let lastWalkingTime = 0;
@@ -158,31 +156,23 @@
     const statusTitle = document.getElementById('status-title');
     const statusDetail = document.getElementById('status-detail');
     const startBtn = document.getElementById('start-btn');
-    const testWalkBtn = document.getElementById('test-walk-btn');
 
     const camThresholdInput = document.getElementById('cam-threshold');
+    const motionThresholdInput = document.getElementById('motion-threshold');
     const camValDisplay = document.getElementById('cam-val');
+    const motionValDisplay = document.getElementById('motion-val');
 
     camThresholdInput.addEventListener('input', (e) => camValDisplay.textContent = e.target.value);
-
-    // --- 擬似歩行ボタンの切り替え ---
-    testWalkBtn.addEventListener('click', () => {
-      forceWalking = !forceWalking;
-      if (forceWalking) {
-        testWalkBtn.textContent = '🏃 擬似歩行モード: ON (歩行中扱い)';
-        testWalkBtn.classList.add('active');
-      } else {
-        testWalkBtn.textContent = '🚶 擬似歩行モード: OFF';
-        testWalkBtn.classList.remove('active');
-      }
-      updateState();
-    });
+    motionThresholdInput.addEventListener('input', (e) => motionValDisplay.textContent = e.target.value);
 
     // --- 1. アプリ起動処理 ---
     startBtn.addEventListener('click', async () => {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      
+      // AIカメラ（MediaPipe FaceMesh）の初期化
       initFaceMesh();
 
+      // Motion Sensor（加速度センサー）の設定
       if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
         const permission = await DeviceMotionEvent.requestPermission();
         if (permission === 'granted') {
@@ -195,9 +185,10 @@
       startBtn.style.display = 'none';
     });
 
-    // --- 2. MediaPipe Face Mesh ---
+    // --- 2. MediaPipe Face Mesh（顔認識AI）による下向き判定 ---
     function initFaceMesh() {
       const faceMesh = new FaceMesh({
+        // 【修正箇所】同じフォルダー（ローカル）のWASMファイルやモデルを読み込む指定
         locateFile: (file) => `./${file}`
       });
 
@@ -220,6 +211,7 @@
       camera.start();
     }
 
+    // 顔特徴点の解析処理
     function onFaceResults(results) {
       if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
         isLookingDown = false;
@@ -228,18 +220,20 @@
       }
 
       const landmarks = results.multiFaceLandmarks[0];
+      
+      // 鼻先（1番）と顎（152番）のY座標から「顔が下を向いているか」を計算
       const noseY = landmarks[1].y;
       const chinY = landmarks[152].y;
-      const faceDiff = chinY - noseY;
+      faceDiff = chinY - noseY;
 
       const threshold = parseFloat(camThresholdInput.value);
       
-      // 俯いた（下を向いた）時の判定
+      // 顎と鼻の位置関係が近づく（俯く）と閾値以下になり下向きと判定
       isLookingDown = faceDiff < (0.25 - threshold);
       updateState();
     }
 
-    // --- 3. 加速度センサー処理 ---
+    // --- 3. 加速度センサー処理（余韻タイマー） ---
     function handleMotion(event) {
       const accel = event.accelerationIncludingGravity;
       if (!accel) return;
@@ -249,26 +243,25 @@
       lastAccel = { y: accel.y, z: accel.z };
 
       const totalDelta = deltaY + deltaZ;
-      const threshold = 3.0;
+      const threshold = parseFloat(motionThresholdInput.value);
       const now = Date.now();
 
       if (totalDelta > threshold) {
         lastWalkingTime = now;
       }
 
-      isWalking = (now - lastWalkingTime) < 2000;
+      const delayTime = 2000; // 2秒間の歩行検知の余韻
+      isWalking = (now - lastWalkingTime) < delayTime;
+
       updateState();
     }
 
     // --- 4. 判定と警告機能 ---
     function updateState() {
-      // センサーの揺れ OR 擬似歩行ボタンがONなら「歩行中」とみなす
-      const currentWalking = isWalking || forceWalking;
-
-      if (isLookingDown && currentWalking) {
+      if (isLookingDown && isWalking) {
         body.className = 'danger';
         statusTitle.textContent = '⚠️ 危険！歩きスマホです！';
-        statusDetail.textContent = '下を向いた状態で移動（擬似歩行）しています！';
+        statusDetail.textContent = '顔が下を向いた状態で移動しています！';
 
         playAlertSound();
         if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
@@ -276,9 +269,9 @@
         body.className = '';
         statusTitle.textContent = '🌱 安全な状態です';
         
-        if (currentWalking && !isLookingDown) {
+        if (isWalking && !isLookingDown) {
           statusDetail.textContent = '前を向いて歩いています';
-        } else if (!currentWalking && isLookingDown) {
+        } else if (!isWalking && isLookingDown) {
           statusDetail.textContent = '立ち止まって操作しています';
         } else {
           statusDetail.textContent = '周囲の安全が確保されています';
