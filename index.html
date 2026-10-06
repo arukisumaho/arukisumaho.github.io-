@@ -1,203 +1,302 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>歩きPC防止システム</title>
-    <style>
-        :root {
-            --bg-color: #f8f9fa;
-            --card-bg: #ffffff;
-            --text-color: #212529;
-            --status-bg: #e9ecef;
-            --status-color: #495057;
-            --primary-color: #0d6efd;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>歩きスマホ自動検知システム</title>
+  
+  <!-- MediaPipe (顔・姿勢認識) のライブラリを読み込み -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            margin: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            transition: background-color 0.3s ease;
-        }
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      color: #fff;
+      transition: background-color 0.3s ease;
+      background-color: #059669; /* 初期状態：緑（安全） */
+      overflow: hidden;
+    }
 
-        /* 危険検知時の背景変化（視覚的にも警告） */
-        body.is-danger {
-            background-color: #fff5f5;
-        }
+    /* 危険時の背景赤点滅 */
+    body.danger {
+      background-color: #dc2626 !important;
+      animation: pulse-bg 0.5s infinite alternate;
+    }
+    @keyframes pulse-bg {
+      0% { background-color: #dc2626; }
+      100% { background-color: #7f1d1d; }
+    }
 
-        .container {
-            background-color: var(--card-bg);
-            padding: 2.5rem;
-            border-radius: 16px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-            width: 90%;
-            max-width: 400px;
-            text-align: center;
-        }
+    header {
+      padding: 16px;
+      text-align: center;
+      background: rgba(0, 0, 0, 0.2);
+    }
+    h1 { font-size: 1.2rem; }
 
-        .icon {
-            font-size: 3rem;
-            margin-bottom: 1rem;
-        }
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      gap: 16px;
+      text-align: center;
+    }
 
-        h1 {
-            font-size: 1.25rem;
-            margin: 0 0 0.5rem 0;
-            font-weight: 600;
-        }
+    #status-card {
+      background: rgba(0, 0, 0, 0.4);
+      padding: 16px 24px;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 320px;
+    }
+    #status-title { font-size: 1.5rem; font-weight: bold; margin-bottom: 8px; }
+    #status-detail { font-size: 0.9rem; opacity: 0.9; }
 
-        p.desc {
-            font-size: 0.875rem;
-            color: #6c757d;
-            margin-bottom: 2rem;
-            line-height: 1.5;
-        }
+    .video-container {
+      position: relative;
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      overflow: hidden;
+      border: 4px solid rgba(255, 255, 255, 0.5);
+      background: #000;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1); /* 鏡像表示 */
+    }
 
-        .status-badge {
-            background-color: var(--status-bg);
-            color: var(--status-color);
-            padding: 0.75rem 1rem;
-            border-radius: 30px;
-            font-size: 0.95rem;
-            font-weight: 600;
-            margin-bottom: 2rem;
-            display: inline-block;
-            transition: all 0.3s ease;
-        }
+    footer {
+      background: rgba(0, 0, 0, 0.6);
+      padding: 20px;
+      border-top-left-radius: 20px;
+      border-top-right-radius: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .slider-group {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      font-size: 0.85rem;
+    }
+    .slider-group label { display: flex; justify-content: space-between; width: 100%; }
+    input[type="range"] { width: 100%; }
 
-        /* 状態ごとのスタイル */
-        .status-badge.active { background-color: #e7f5ff; color: #1c7ed6; }
-        .status-badge.danger { background-color: #ffe3e3; color: #e03131; }
-
-        .btn {
-            width: 100%;
-            padding: 0.875rem;
-            font-size: 1rem;
-            font-weight: 600;
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: background-color 0.2s ease;
-        }
-
-        .btn:hover {
-            opacity: 0.9;
-        }
-
-        .btn.stop {
-            background-color: #6c757d;
-        }
-
-        /* カメラとキャンバスは非表示でバックグラウンド処理 */
-        #video, #canvas { display: none; }
-    </style>
+    button {
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      background: #3b82f6;
+      color: white;
+      font-weight: bold;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+  </style>
 </head>
 <body>
 
-    <div class="container">
-        <div class="icon" id="icon">💻</div>
-        <h1>歩きPC検知見守り</h1>
-        <p class="desc">画面を開いたままの移動を検知し<br>安全な利用をサポートします</p>
+  <header>
+    <h1>歩きスマホ自動検知システム (MediaPipe版)</h1>
+  </header>
 
-        <div id="status" class="status-badge">停止中</div>
-
-        <button id="toggleBtn" class="btn" onclick="toggleDetection()">監視をスタート</button>
+  <main>
+    <div class="video-container">
+      <video id="webcam" playsinline muted></video>
     </div>
 
-    <video id="video" width="320" height="240" autoplay playsinline></video>
-    <canvas id="canvas" width="320" height="240"></canvas>
+    <div id="status-card">
+      <div id="status-title">🌱 安全な状態です</div>
+      <div id="status-detail">ボタンを押して監視を開始してください</div>
+    </div>
+  </main>
 
-    <script>
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        const statusDiv = document.getElementById('status');
-        const toggleBtn = document.getElementById('toggleBtn');
-        const iconDiv = document.getElementById('icon');
+  <footer>
+    <button id="start-btn">センサー・AIカメラを開始</button>
 
-        let audioCtx = null;
-        let lastFrameData = null;
-        let isRunning = false;
-        let intervalId = null;
+    <div class="slider-group">
+      <label>
+        <span>顔の下向き感度閾値:</span>
+        <span id="cam-val">0.05</span>
+      </label>
+      <input type="range" id="cam-threshold" min="0.01" max="0.15" step="0.01" value="0.05">
+    </div>
 
-        function playAlarm() {
-            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            let osc = audioCtx.createOscillator();
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(600, audioCtx.currentTime); 
-            osc.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.4);
+    <div class="slider-group">
+      <label>
+        <span>加速度センサー閾値（歩行揺れ）:</span>
+        <span id="motion-val">3.0</span>
+      </label>
+      <input type="range" id="motion-threshold" min="1.0" max="10.0" step="0.5" value="3.0">
+    </div>
+  </footer>
+
+  <script>
+    let isLookingDown = false;
+    let isWalking = false;
+    let audioCtx = null;
+    let lastAccel = { y: 0, z: 0 };
+    let lastWalkingTime = 0;
+
+    const body = document.body;
+    const video = document.getElementById('webcam');
+    const statusTitle = document.getElementById('status-title');
+    const statusDetail = document.getElementById('status-detail');
+    const startBtn = document.getElementById('start-btn');
+
+    const camThresholdInput = document.getElementById('cam-threshold');
+    const motionThresholdInput = document.getElementById('motion-threshold');
+    const camValDisplay = document.getElementById('cam-val');
+    const motionValDisplay = document.getElementById('motion-val');
+
+    camThresholdInput.addEventListener('input', (e) => camValDisplay.textContent = e.target.value);
+    motionThresholdInput.addEventListener('input', (e) => motionValDisplay.textContent = e.target.value);
+
+    // --- 1. アプリ起動処理 ---
+    startBtn.addEventListener('click', async () => {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      
+      // AIカメラ（MediaPipe FaceMesh）の初期化
+      initFaceMesh();
+
+      // Motion Sensor（加速度センサー）の設定
+      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        const permission = await DeviceMotionEvent.requestPermission();
+        if (permission === 'granted') {
+          window.addEventListener('devicemotion', handleMotion);
         }
+      } else {
+        window.addEventListener('devicemotion', handleMotion);
+      }
 
-        async function toggleDetection() {
-            if (!isRunning) {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                    video.srcObject = stream;
-                    isRunning = true;
-                    
-                    toggleBtn.innerText = "監視を停止";
-                    toggleBtn.classList.add('stop');
-                    statusDiv.innerText = "安全に監視中";
-                    statusDiv.className = "status-badge active";
-                    
-                    intervalId = setInterval(checkMovement, 200);
-                } catch (err) {
-                    alert("カメラの起動に失敗しました。設定を確認してください。");
-                    console.error(err);
-                }
-            } else {
-                // 停止処理
-                isRunning = false;
-                clearInterval(intervalId);
-                if (video.srcObject) {
-                    video.srcObject.getTracks().forEach(track => track.stop());
-                }
-                toggleBtn.innerText = "監視をスタート";
-                toggleBtn.classList.remove('stop');
-                statusDiv.innerText = "停止中";
-                statusDiv.className = "status-badge";
-                document.body.classList.remove('is-danger');
-                iconDiv.innerText = "💻";
-            }
-        }
+      startBtn.style.display = 'none';
+    });
 
-        function checkMovement() {
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                
-                if (lastFrameData) {
-                    let diff = 0;
-                    for (let i = 0; i < currentFrame.data.length; i += 4) {
-                        diff += Math.abs(currentFrame.data[i] - lastFrameData.data[i]);
-                    }
-                    
-                    if (diff > 1500000) { 
-                        statusDiv.innerText = "⚠️ 歩行を検知しました";
-                        statusDiv.className = "status-badge danger";
-                        document.body.classList.add('is-danger');
-                        iconDiv.innerText = "🚨";
-                        playAlarm();
-                    } else {
-                        statusDiv.innerText = "安全（静止状態）";
-                        statusDiv.className = "status-badge active";
-                        document.body.classList.remove('is-danger');
-                        iconDiv.innerText = "🛡️";
-                    }
-                }
-                lastFrameData = currentFrame;
-            }
+    // --- 2. MediaPipe Face Mesh（顔認識AI）による下向き判定 ---
+    function initFaceMesh() {
+      const faceMesh = new FaceMesh({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+      });
+
+      faceMesh.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+
+      faceMesh.onResults(onFaceResults);
+
+      const camera = new Camera(video, {
+        onFrame: async () => {
+          await faceMesh.send({ image: video });
+        },
+        width: 320,
+        height: 240
+      });
+      camera.start();
+    }
+
+    // 顔特徴点の解析処理
+    function onFaceResults(results) {
+      if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
+        isLookingDown = false;
+        updateState();
+        return;
+      }
+
+      const landmarks = results.multiFaceLandmarks[0];
+      
+      // 鼻先（1番）と顎（152番）のY座標から「顔が下を向いているか」を計算
+      const noseY = landmarks[1].y;
+      const chinY = landmarks[152].y;
+      const faceDiff = chinY - noseY;
+
+      const threshold = parseFloat(camThresholdInput.value);
+      
+      // 顎と鼻の位置関係が近づく（俯く）と閾値以下になり下向きと判定
+      isLookingDown = faceDiff < (0.25 - threshold);
+      updateState();
+    }
+
+    // --- 3. 加速度センサー処理（余韻タイマー） ---
+    function handleMotion(event) {
+      const accel = event.accelerationIncludingGravity;
+      if (!accel) return;
+
+      const deltaY = Math.abs(accel.y - lastAccel.y);
+      const deltaZ = Math.abs(accel.z - lastAccel.z);
+      lastAccel = { y: accel.y, z: accel.z };
+
+      const totalDelta = deltaY + deltaZ;
+      const threshold = parseFloat(motionThresholdInput.value);
+      const now = Date.now();
+
+      if (totalDelta > threshold) {
+        lastWalkingTime = now;
+      }
+
+      const delayTime = 2000; // 2秒間の歩行検知の余韻
+      isWalking = (now - lastWalkingTime) < delayTime;
+
+      updateState();
+    }
+
+    // --- 4. 判定と警告機能 ---
+    function updateState() {
+      if (isLookingDown && isWalking) {
+        body.className = 'danger';
+        statusTitle.textContent = '⚠️ 危険！歩きスマホです！';
+        statusDetail.textContent = '顔が下を向いた状態で移動しています！';
+
+        playAlertSound();
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      } else {
+        body.className = '';
+        statusTitle.textContent = '🌱 安全な状態です';
+        
+        if (isWalking && !isLookingDown) {
+          statusDetail.textContent = '前を向いて歩いています';
+        } else if (!isWalking && isLookingDown) {
+          statusDetail.textContent = '立ち止まって操作しています';
+        } else {
+          statusDetail.textContent = '周囲の安全が確保されています';
         }
-    </script>
+      }
+    }
+
+    let lastSoundTime = 0;
+    function playAlertSound() {
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+      if (now - lastSoundTime < 0.5) return;
+      lastSoundTime = now;
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(880, now);
+      gain.gain.setValueAtTime(0.1, now);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.3);
+    }
+  </script>
 </body>
 </html>
