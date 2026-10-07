@@ -3,58 +3,88 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>歩きスマホ自動検知システム</title>
+  <title>歩きスマホ自動検知システム - CYBER OS</title>
   
   <!-- MediaPipe (顔・姿勢認識) のライブラリを読み込み -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
 
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
     
     body {
-      font-family: 'Consolas', 'Courier New', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: 'Share Tech Mono', 'Consolas', monospace;
       display: flex;
       flex-direction: column;
       height: 100vh;
       color: #0f172a;
-      transition: background 0.3s ease;
-      /* 白ベースのサイバーグリッド背景 */
-      background-color: #f8fafc;
+      transition: all 0.3s ease;
+      background-color: #f1f5f9;
+      /* 高精細なサイバーグリッド背景 */
       background-image: 
-        linear-gradient(rgba(14, 165, 233, 0.08) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(14, 165, 233, 0.08) 1px, transparent 1px);
-      background-size: 20px 20px;
+        radial-gradient(circle at 50% 50%, rgba(56, 189, 248, 0.1) 0%, transparent 60%),
+        linear-gradient(rgba(14, 165, 233, 0.1) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(14, 165, 233, 0.1) 1px, transparent 1px);
+      background-size: 100% 100%, 20px 20px, 20px 20px;
       overflow: hidden;
+      position: relative;
+    }
+
+    /* 走査線（スキャンライン）アニメーション */
+    body::after {
+      content: " ";
+      display: block;
+      position: absolute;
+      top: 0; left: 0; bottom: 0; right: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.03) 50%);
+      background-size: 100% 4px;
+      z-index: 100;
+      pointer-events: none;
     }
 
     /* 危険時の背景赤点滅 */
     body.danger {
       background-color: #ef4444 !important;
       background-image: 
-        linear-gradient(rgba(255, 255, 255, 0.15) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 255, 255, 0.15) 1px, transparent 1px) !important;
-      animation: pulse-bg 0.5s infinite alternate;
+        radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.2) 0%, transparent 70%),
+        linear-gradient(rgba(255, 255, 255, 0.2) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.2) 1px, transparent 1px) !important;
+      animation: pulse-bg 0.4s infinite alternate;
     }
     @keyframes pulse-bg {
       0% { background-color: #ef4444; }
-      100% { background-color: #991b1b; }
+      100% { background-color: #7f1d1d; }
     }
 
     header {
       padding: 16px;
       text-align: center;
       background: rgba(255, 255, 255, 0.85);
-      backdrop-filter: blur(8px);
+      backdrop-filter: blur(12px);
       border-bottom: 2px solid #0284c7;
-      box-shadow: 0 2px 12px rgba(2, 132, 199, 0.15);
+      box-shadow: 0 4px 20px rgba(2, 132, 199, 0.2);
+      position: relative;
+      z-index: 10;
     }
     h1 { 
       font-size: 1.1rem; 
-      letter-spacing: 0.08em;
+      letter-spacing: 0.15em;
       color: #0f172a;
-      text-shadow: 0 0 4px rgba(56, 189, 248, 0.4);
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
     }
+    h1::before {
+      content: '●';
+      color: #0ea5e9;
+      font-size: 0.8rem;
+      animation: blink 1s infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
 
     main {
       flex: 1;
@@ -65,51 +95,26 @@
       padding: 16px;
       gap: 20px;
       text-align: center;
+      z-index: 10;
     }
 
-    #status-card {
-      background: rgba(255, 255, 255, 0.9);
-      backdrop-filter: blur(10px);
-      padding: 20px 24px;
-      border-radius: 8px;
-      width: 100%;
-      max-width: 320px;
-      border: 1px solid #38bdf8;
-      box-shadow: 0 0 15px rgba(56, 189, 248, 0.2), inset 0 0 10px rgba(56, 189, 248, 0.05);
-      position: relative;
-    }
-    /* 四隅のサイバー装飾コーナーパーツ */
-    #status-card::before {
-      content: '';
-      position: absolute;
-      top: -2px; left: -2px;
-      width: 10px; height: 10px;
-      border-top: 2px solid #0284c7;
-      border-left: 2px solid #0284c7;
-    }
-    #status-card::after {
-      content: '';
-      position: absolute;
-      bottom: -2px; right: -2px;
-      width: 10px; height: 10px;
-      border-bottom: 2px solid #0284c7;
-      border-right: 2px solid #0284c7;
-    }
-
-    #status-title { font-size: 1.4rem; font-weight: bold; margin-bottom: 8px; color: #0f172a; }
-    body.danger #status-title { color: #ffffff; }
-    #status-detail { font-size: 0.85rem; color: #475569; }
-    body.danger #status-detail { color: #fecdd3; }
-
+    /* ビデオ表示部：サイバーホログラム風 */
     .video-container {
       position: relative;
-      width: 180px;
-      height: 180px;
+      width: 190px;
+      height: 190px;
+      border-radius: 50%;
+      padding: 6px;
+      background: linear-gradient(135deg, #0ea5e9, #38bdf8, transparent);
+      box-shadow: 0 0 25px rgba(14, 165, 233, 0.4);
+    }
+    .video-inner {
+      width: 100%;
+      height: 100%;
       border-radius: 50%;
       overflow: hidden;
-      border: 3px solid #38bdf8;
-      box-shadow: 0 0 20px rgba(56, 189, 248, 0.3);
-      background: #0f172a;
+      background: #090d16;
+      position: relative;
     }
     video {
       width: 100%;
@@ -118,74 +123,129 @@
       transform: scaleX(-1);
     }
 
+    /* ステータスカード：カットオフ角デザイン */
+    #status-card {
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(12px);
+      padding: 20px 24px;
+      width: 100%;
+      max-width: 340px;
+      border: 1px solid #38bdf8;
+      /* 角斜めカット（SFパーツ風） */
+      clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08), 0 0 15px rgba(56, 189, 248, 0.2);
+      position: relative;
+      transition: all 0.3s;
+    }
+    body.danger #status-card {
+      background: rgba(15, 23, 42, 0.95);
+      border-color: #f87171;
+      box-shadow: 0 0 30px rgba(239, 68, 68, 0.6);
+    }
+
+    #status-title { 
+      font-size: 1.3rem; 
+      font-weight: bold; 
+      margin-bottom: 8px; 
+      color: #0f172a; 
+      letter-spacing: 0.05em;
+    }
+    body.danger #status-title { color: #fca5a5; }
+
+    #status-detail { font-size: 0.85rem; color: #475569; font-weight: 500; }
+    body.danger #status-detail { color: #fecdd3; }
+
+    /* 操作エリア */
     footer {
-      background: rgba(255, 255, 255, 0.9);
-      backdrop-filter: blur(10px);
-      padding: 20px;
-      border-top: 2px solid #38bdf8;
-      border-top-left-radius: 16px;
-      border-top-right-radius: 16px;
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(12px);
+      padding: 24px 20px;
+      border-top: 2px solid #0284c7;
+      border-top-left-radius: 20px;
+      border-top-right-radius: 20px;
       display: flex;
       flex-direction: column;
-      gap: 14px;
-      box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.05);
+      gap: 16px;
+      box-shadow: 0 -10px 30px rgba(2, 132, 199, 0.1);
+      z-index: 10;
     }
+
     .slider-group {
       display: flex;
       flex-direction: column;
       align-items: flex-start;
-      gap: 4px;
+      gap: 6px;
       font-size: 0.8rem;
       color: #334155;
     }
-    .slider-group label { display: flex; justify-content: space-between; width: 100%; font-weight: 600; }
+    .slider-group label { 
+      display: flex; 
+      justify-content: space-between; 
+      width: 100%; 
+      font-weight: bold;
+      letter-spacing: 0.05em;
+    }
     
     input[type="range"] {
       width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: #e2e8f0;
+      outline: none;
       accent-color: #0284c7;
     }
 
+    /* サイバーネオンボタン */
     button {
-      padding: 14px;
+      padding: 16px;
       border: 1px solid #38bdf8;
-      border-radius: 6px;
-      background: linear-gradient(135deg, #0284c7, #0369a1);
+      background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
       color: white;
+      font-family: inherit;
       font-weight: bold;
-      font-size: 0.95rem;
-      letter-spacing: 0.05em;
+      font-size: 1rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
       cursor: pointer;
-      box-shadow: 0 0 10px rgba(2, 132, 199, 0.3);
+      clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+      box-shadow: 0 0 15px rgba(2, 132, 199, 0.4);
       transition: all 0.2s ease;
     }
+    button:hover {
+      background: linear-gradient(135deg, #0369a1 0%, #0284c7 100%);
+      box-shadow: 0 0 25px rgba(14, 165, 233, 0.7);
+      transform: translateY(-1px);
+    }
     button:active {
-      transform: scale(0.98);
+      transform: translateY(1px);
     }
   </style>
 </head>
 <body>
 
   <header>
-    <h1>歩きスマホ自動検知システム (MediaPipe版)</h1>
+    <h1>Anti-Cell Phone Walking App / AI MONITOR</h1>
   </header>
 
   <main>
     <div class="video-container">
-      <video id="webcam" playsinline muted></video>
+      <div class="video-inner">
+        <video id="webcam" playsinline muted></video>
+      </div>
     </div>
 
     <div id="status-card">
-      <div id="status-title">安全な状態です</div>
-      <div id="status-detail">ボタンを押して監視を開始してください</div>
+      <div id="status-title">STANDBY / 安全</div>
+      <div id="status-detail">システムを開始してください</div>
     </div>
   </main>
 
   <footer>
-    <button id="start-btn">SYSTEM START / センサー開始</button>
+    <button id="start-btn">▶ START SYSTEM</button>
 
     <div class="slider-group">
       <label>
-        <span>顔の下向き感度閾値:</span>
+        <span>SENSITIVITY (顔下向き感度):</span>
         <span id="cam-val">0.05</span>
       </label>
       <input type="range" id="cam-threshold" min="0.01" max="0.15" step="0.01" value="0.05">
@@ -193,7 +253,7 @@
 
     <div class="slider-group">
       <label>
-        <span>加速度センサー閾値（歩行揺れ）:</span>
+        <span>MOTION SENSOR (歩行揺れ):</span>
         <span id="motion-val">3.0</span>
       </label>
       <input type="range" id="motion-threshold" min="1.0" max="10.0" step="0.5" value="3.0">
@@ -315,14 +375,14 @@
     function updateState() {
       if (isLookingDown && isWalking) {
         body.className = 'danger';
-        statusTitle.textContent = '⚠️ 危険！歩きスマホです！';
+        statusTitle.textContent = '⚠DANGER / 歩きスマホ⚠';
         statusDetail.textContent = '顔が下を向いた状態で移動しています！';
 
         playAlertSound();
         if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
       } else {
         body.className = '';
-        statusTitle.textContent = '安全な状態です';
+        statusTitle.textContent = 'SAFE / 安全';
         
         if (isWalking && !isLookingDown) {
           statusDetail.textContent = '前を向いて歩いています';
