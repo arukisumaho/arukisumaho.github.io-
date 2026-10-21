@@ -131,7 +131,6 @@
       width: 100%;
       max-width: 340px;
       border: 1px solid #38bdf8;
-      /* 角斜めカット（SFパーツ風） */
       clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08), 0 0 15px rgba(56, 189, 248, 0.2);
       position: relative;
@@ -235,7 +234,7 @@
     </div>
 
     <div id="status-card">
-      <div id="status-title">STANDBY / 安全</div>
+      <div id="status-title">SAFE / 安全</div>
       <div id="status-detail">システムを開始してください</div>
     </div>
   </main>
@@ -253,10 +252,11 @@
 
     <div class="slider-group">
       <label>
-        <span>MOTION SENSOR (歩行揺れ):</span>
-        <span id="motion-val">3.0</span>
+        <span>MOTION SENSOR (歩行揺れ高感度化):</span>
+        <span id="motion-val">1.0</span>
       </label>
-      <input type="range" id="motion-threshold" min="1.0" max="10.0" step="0.5" value="3.0">
+      <!-- 高感度検知のために最小値を 0.2、初期値を 1.0 に調整 -->
+      <input type="range" id="motion-threshold" min="0.2" max="5.0" step="0.1" value="1.0">
     </div>
   </footer>
 
@@ -264,7 +264,7 @@
     let isLookingDown = false;
     let isWalking = false;
     let audioCtx = null;
-    let lastAccel = { y: 0, z: 0 };
+    let lastAccel = { x: 0, y: 0, z: 0 }; // 3軸の過去データを記録
     let lastWalkingTime = 0;
 
     const body = document.body;
@@ -301,7 +301,7 @@
       startBtn.style.display = 'none';
     });
 
-    // --- 2. MediaPipe Face Mesh（顔認識AI）による下向き判定 ---
+    // --- 2. MediaPipe Face Mesh（顔認識AI）による下向き判定（完全未修正） ---
     function initFaceMesh() {
       const faceMesh = new FaceMesh({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
@@ -326,7 +326,7 @@
       camera.start();
     }
 
-    // 顔特徴点の解析処理
+    // 顔特徴点の解析処理（完全未修正）
     function onFaceResults(results) {
       if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
         isLookingDown = false;
@@ -348,19 +348,23 @@
       updateState();
     }
 
-    // --- 3. 加速度センサー処理（余韻タイマー） ---
+    // --- 3. 加速度センサー処理（手持ち歩行用に高感度化） ---
     function handleMotion(event) {
       const accel = event.accelerationIncludingGravity;
       if (!accel) return;
 
-      const deltaY = Math.abs(accel.y - lastAccel.y);
-      const deltaZ = Math.abs(accel.z - lastAccel.z);
-      lastAccel = { y: accel.y, z: accel.z };
+      // 3軸（X, Y, Z）すべての微妙な揺れを検知できるように拡張
+      const deltaX = Math.abs((accel.x || 0) - lastAccel.x);
+      const deltaY = Math.abs((accel.y || 0) - lastAccel.y);
+      const deltaZ = Math.abs((accel.z || 0) - lastAccel.z);
+      lastAccel = { x: accel.x || 0, y: accel.y || 0, z: accel.z || 0 };
 
-      const totalDelta = deltaY + deltaZ;
+      // 3軸の変化量の合計を計算
+      const totalDelta = deltaX + deltaY + deltaZ;
       const threshold = parseFloat(motionThresholdInput.value);
       const now = Date.now();
 
+      // 設定した閾値（デフォルト1.0）を超えたら「歩行中」と判断
       if (totalDelta > threshold) {
         lastWalkingTime = now;
       }
