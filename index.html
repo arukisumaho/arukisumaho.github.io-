@@ -22,7 +22,6 @@
       color: #0f172a;
       transition: all 0.3s ease;
       background-color: #f1f5f9;
-      /* 高精細なサイバーグリッド背景 */
       background-image: 
         radial-gradient(circle at 50% 50%, rgba(56, 189, 248, 0.1) 0%, transparent 60%),
         linear-gradient(rgba(14, 165, 233, 0.1) 1px, transparent 1px),
@@ -32,7 +31,6 @@
       position: relative;
     }
 
-    /* 走査線（スキャンライン）アニメーション */
     body::after {
       content: " ";
       display: block;
@@ -44,7 +42,6 @@
       pointer-events: none;
     }
 
-    /* 危険時の背景赤点滅 */
     body.danger {
       background-color: #ef4444 !important;
       background-image: 
@@ -98,7 +95,6 @@
       z-index: 10;
     }
 
-    /* ビデオ表示部：サイバーホログラム風 */
     .video-container {
       position: relative;
       width: 190px;
@@ -123,7 +119,6 @@
       transform: scaleX(-1);
     }
 
-    /* ステータスカード：カットオフ角デザイン */
     #status-card {
       background: rgba(255, 255, 255, 0.92);
       backdrop-filter: blur(12px);
@@ -154,7 +149,6 @@
     #status-detail { font-size: 0.85rem; color: #475569; font-weight: 500; }
     body.danger #status-detail { color: #fecdd3; }
 
-    /* 操作エリア */
     footer {
       background: rgba(255, 255, 255, 0.92);
       backdrop-filter: blur(12px);
@@ -194,7 +188,6 @@
       accent-color: #0284c7;
     }
 
-    /* サイバーネオンボタン */
     button {
       padding: 16px;
       border: 1px solid #38bdf8;
@@ -255,7 +248,6 @@
         <span>MOTION SENSOR (歩行揺れ高感度化):</span>
         <span id="motion-val">1.0</span>
       </label>
-      <!-- 高感度検知のために最小値を 0.2、初期値を 1.0 に調整 -->
       <input type="range" id="motion-threshold" min="0.2" max="5.0" step="0.1" value="1.0">
     </div>
   </footer>
@@ -264,7 +256,7 @@
     let isLookingDown = false;
     let isWalking = false;
     let audioCtx = null;
-    let lastAccel = { x: 0, y: 0, z: 0 }; // 3軸の過去データを記録
+    let lastAccel = { x: 0, y: 0, z: 0 };
     let lastWalkingTime = 0;
 
     const body = document.body;
@@ -284,11 +276,8 @@
     // --- 1. アプリ起動処理 ---
     startBtn.addEventListener('click', async () => {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      
-      // AIカメラ（MediaPipe FaceMesh）の初期化
       initFaceMesh();
 
-      // Motion Sensor（加速度センサー）の設定
       if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
         const permission = await DeviceMotionEvent.requestPermission();
         if (permission === 'granted') {
@@ -301,7 +290,7 @@
       startBtn.style.display = 'none';
     });
 
-    // --- 2. MediaPipe Face Mesh（顔認識AI）による下向き判定（完全未修正） ---
+    // --- 2. MediaPipe Face Mesh（顔認識AI） ---
     function initFaceMesh() {
       const faceMesh = new FaceMesh({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
@@ -326,7 +315,7 @@
       camera.start();
     }
 
-    // 顔特徴点の解析処理（完全未修正）
+    // 顔特徴点の解析処理（中心判定を追加！）
     function onFaceResults(results) {
       if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
         isLookingDown = false;
@@ -335,41 +324,40 @@
       }
 
       const landmarks = results.multiFaceLandmarks[0];
-      
-      // 鼻先（1番）と顎（152番）のY座標から「顔が下を向いているか」を計算
-      const noseY = landmarks[1].y;
+      const noseX = landmarks[1].x; // 鼻先のX座標 (0.0〜1.0)
+      const noseY = landmarks[1].y; // 鼻先のY座標 (0.0〜1.0)
       const chinY = landmarks[152].y;
-      const faceDiff = chinY - noseY;
 
+      // ★追加：顔の中心度合い（画面中央 X:0.3〜0.7, Y:0.2〜0.8 の枠内にあるか）
+      const isCentered = (noseX >= 0.3 && noseX <= 0.7) && (noseY >= 0.2 && noseY <= 0.8);
+
+      const faceDiff = chinY - noseY;
       const threshold = parseFloat(camThresholdInput.value);
       
-      // 顎と鼻の位置関係が近づく（俯く）と閾値以下になり下向きと判定
-      isLookingDown = faceDiff < (0.25 - threshold);
+      // 俯いていて、かつ「顔が画面中央にあるとき」だけ下向き操作とみなす
+      isLookingDown = (faceDiff < (0.25 - threshold)) && isCentered;
       updateState();
     }
 
-    // --- 3. 加速度センサー処理（手持ち歩行用に高感度化） ---
+    // --- 3. 加速度センサー処理 ---
     function handleMotion(event) {
       const accel = event.accelerationIncludingGravity;
       if (!accel) return;
 
-      // 3軸（X, Y, Z）すべての微妙な揺れを検知できるように拡張
       const deltaX = Math.abs((accel.x || 0) - lastAccel.x);
       const deltaY = Math.abs((accel.y || 0) - lastAccel.y);
       const deltaZ = Math.abs((accel.z || 0) - lastAccel.z);
       lastAccel = { x: accel.x || 0, y: accel.y || 0, z: accel.z || 0 };
 
-      // 3軸の変化量の合計を計算
       const totalDelta = deltaX + deltaY + deltaZ;
       const threshold = parseFloat(motionThresholdInput.value);
       const now = Date.now();
 
-      // 設定した閾値（デフォルト1.0）を超えたら「歩行中」と判断
       if (totalDelta > threshold) {
         lastWalkingTime = now;
       }
 
-      const delayTime = 2000; // 2秒間の歩行検知の余韻
+      const delayTime = 2000;
       isWalking = (now - lastWalkingTime) < delayTime;
 
       updateState();
@@ -380,7 +368,7 @@
       if (isLookingDown && isWalking) {
         body.className = 'danger';
         statusTitle.textContent = '⚠DANGER / 歩きスマホ⚠';
-        statusDetail.textContent = '顔が下を向いた状態で移動しています！';
+        statusDetail.textContent = '顔が中央で下を向いた状態で移動しています！';
 
         playAlertSound();
         if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
@@ -389,7 +377,7 @@
         statusTitle.textContent = 'SAFE / 安全';
         
         if (isWalking && !isLookingDown) {
-          statusDetail.textContent = '前を向いて歩いています';
+          statusDetail.textContent = '前を向いて歩行中（または画面枠外）';
         } else if (!isWalking && isLookingDown) {
           statusDetail.textContent = '立ち止まって操作しています';
         } else {
